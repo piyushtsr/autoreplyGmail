@@ -86,4 +86,125 @@ async function listLabels(auth) {
   });
 }
 
+// Set up a function to check for new emails
+async function checkForNewEmails() {
+    try {
+      const response = await gmail.users.messages.list({
+        userId: 'me',
+        labelIds: ['INBOX'],
+        q: 'is:unread'
+      });
+      if (!response.data.messages) {
+        return;
+      }
+      const messages = response.data.messages;
+      for (const message of messages) {
+        const email = await getEmail(message.id);
+        if (email) {
+          const shouldReply = await shouldAutoReply(email);
+          if (shouldReply) {
+            const response = await sendAutoReply(email);
+            await tagEmail(response.data.id, 'AutoReplied');
+          }
+        }
+      }
+    } catch (error) {
+      console.log(error);
+    }
+  }
+  
+  // Set up a function to get email data
+  async function getEmail(emailId) {
+    try {
+      const response = await gmail.users.messages.get({
+        userId: 'me',
+        id: emailId
+      });
+      return response.data;
+    } catch (error) {
+      console.log(error);
+    }
+  }
+  
+  // Set up a function to check if an email should receive an auto-reply
+  async function shouldAutoReply(email) {
+    try {
+      // Check if the email has a label indicating it has already been replied to
+      if (email.labelIds.includes('AutoReplied')) {
+        return false;
+      }
+      // Check if the email is a reply to a previous email
+      if (email.payload.headers.find(header => header.name === 'In-Reply-To')) {
+        return false;
+      }
+      return true;
+    } catch (error) {
+      console.log(error);
+    }
+  }
+  
+  // Set up a function to send an auto-reply
+  async function sendAutoReply(email) {
+    try {
+      // Construct the auto-reply message
+      const message = {
+        to: email.payload.headers.find(header => header.name === 'From').value,
+        subject: 'Auto-Reply: Out of Office',
+        body: 'Thank you for your email. I am currently out of the office and will respond to your message as soon as possible.',
+        threadId: email.threadId
+      };
+      // Send the auto-reply message
+      const response = await gmail.users.messages.send({
+        userId: 'me',
+        requestBody: {
+          threadId: message.threadId,
+          message: {
+            to: message.to,
+            subject: message.subject,
+            body: {
+              plain: message.body
+            }
+          }
+        }
+      });
+      return response;
+    } catch (error) {
+      console.log(error);
+    }
+  }
+  
+  // Set up a function to tag an email with a label
+  async function tagEmail(emailId, labelName) {
+    try {
+      // Get the label with the given name or create it if it doesn't exist
+      const labelResponse = await gmail.users.labels.list({
+        userId: 'me'
+      });
+      let label = labelResponse.data.labels.find(label => label.name === labelName);
+      if (!label) {
+        label = await gmail.users.labels.create({
+          userId: 'me',
+          requestBody: {
+            name: labelName,
+            labelListVisibility: 'labelShow',
+            messageListVisibility: 'show'
+          }
+        });
+      }
+      // Tag the email with the label
+      await gmail.users.messages.modify({
+        userId: 'me',
+        id: emailId,
+        requestBody: {
+          addLabelIds: [label.id]
+        }
+      });
+    } catch (error) {
+      console.log(error);
+    }
+  }
+  
+ 
+  
+
 authorize().then(listLabels).catch(console.error);
